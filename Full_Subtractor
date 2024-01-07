@@ -1,0 +1,179 @@
+//RTL/////////////////////////////////////////
+module full_sub (
+  input [3:0] a,
+  input [3:0] b,
+  input [3:0] cin,
+  output [4:0] dif,borrow );
+  
+  assign dif = a ^ b ^cin;
+  assign borrow = (~a & b) | (~(a ^ b) & cin);
+
+endmodule
+
+//Interface for TB
+interface fsi;
+  logic [3:0] a;
+  logic [3:0] b;
+  logic [3:0] cin;
+  logic [4:0] dif;
+  logic [4:0] borrow;
+endinterface
+
+
+
+/////////////////////////////////////////
+/////SV TEST BENCH//////////////////////
+class transaction;
+  rand bit [3:0] a;
+  rand bit [3:0] b;
+  rand bit [3:0] cin;
+  bit  [4:0] diff;
+  bit [4:0] borrow;  
+endclass
+
+class generator;
+  transaction tr;
+  mailbox #(transaction) g2d;
+ 
+  function new(mailbox #(transaction) g2d);
+    //this.new=new();
+    this.g2d=g2d;
+  endfunction
+  
+  task run;
+    forever begin
+      tr=new();
+      assert(tr.randomize()) else $display("Nope");
+      g2d.put(tr);
+      $display("values generated a%0d b%0d cin%0d",tr.a,tr.b,tr.cin);
+    end
+  endtask
+endclass
+
+class driver;
+  transaction tr;
+  generator gr;
+  mailbox #(transaction) g2d;
+  virtual fsi fs; 
+  
+  function new(mailbox #(transaction) g2d);
+    //this.new=new();
+    this.g2d=g2d;
+  endfunction
+  
+  task run;
+    //tr=new();
+    //gr=new();
+    forever begin
+      g2d.get(tr);
+      fs.a=tr.a;
+      fs.b=tr.b;
+      fs.cin=tr.cin;
+      $display("values generated a%0d b%0d cin%0d",fs.a,fs.b,fs.cin);
+    end
+  endtask
+endclass
+
+class monitor;
+  driver dr;
+  virtual fsi fs;
+  transaction tr;
+  mailbox #(transaction) m2s;
+  
+  function new(mailbox #(transaction) m2s);
+    this.m2s=m2s;
+  endfunction
+  
+  task run;
+    tr=new();
+    forever begin
+      tr.a <= fs.a;
+      tr.b <= fs.b;
+      tr.cin <= fs.cin;
+      m2s.put(tr);
+    end
+  endtask
+endclass
+
+class scoreboard;
+  monitor mon;
+  transaction tr;
+    mailbox #(transaction) m2s;
+  //mailbox m2s//Monitor to scoreboard
+  
+  function new(mailbox #(transaction) m2s);
+    this.m2s=m2s;
+  endfunction
+  
+  task run;
+    forever begin
+      m2s.get(tr);
+      //Reference model
+      if ((tr.a - tr.b - tr.cin) == tr.cin)
+        $display("Passs Bro");
+      else
+        $display("NOPEE BRO");
+    end
+  endtask
+endclass
+
+class environment;
+  generator gr;
+  driver dr;
+  monitor mon;
+  scoreboard scr;
+  
+  mailbox #(transaction)g2d= new();
+  mailbox #(transaction)m2s= new();
+  virtual fsi fi;
+  
+  function new(virtual fsi fi);
+    this.fi=fi;
+    gr=new(g2d);
+    dr=new(g2d);
+    mon=new(m2s);
+    scr=new(m2s);
+  endfunction
+  
+  task run();
+    fork
+      gr.run();
+      dr.run();
+      mon.run();
+      scr.run();
+    join
+  endtask
+endclass
+
+class test;
+  environment env;
+  virtual fsi fi;
+  
+  function new(virtual fsi fi);
+    this.fi=fi;
+  endfunction
+  
+  task run;
+    env.run();
+  endtask
+endclass
+  
+
+module test_bench;
+  fsi fi();
+  test t;
+  
+  full_sub dut(.a(fi.a),.b(fi.b),.cin(fi.cin),.dif(fi.dif),.borrow(fi.borrow));
+  
+  initial begin
+    //fi=new();
+    t=new(fi);
+    t.run();
+  end
+  
+  initial begin
+    #100;
+    $finish();
+  end
+  
+endmodule  
