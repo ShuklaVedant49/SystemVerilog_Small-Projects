@@ -23,6 +23,15 @@ endinterface
 
 /////////////////////////////////////////
 /////SV TEST BENCH//////////////////////
+//Interface for TB
+interface fsi;
+  logic [3:0] a;
+  logic [3:0] b;
+  logic [3:0] cin;
+  logic [4:0] dif;
+  logic [4:0] borrow;
+endinterface
+//-----------------------------------------------------------------------------//
 class transaction;
   rand bit [3:0] a;
   rand bit [3:0] b;
@@ -30,71 +39,77 @@ class transaction;
   bit  [4:0] diff;
   bit [4:0] borrow;  
 endclass
-
+//--------------------------------------------------------------------------//
 class generator;
   transaction tr;
+  int count=0;
   mailbox #(transaction) g2d;
  
   function new(mailbox #(transaction) g2d);
-    //this.new=new();
-    this.g2d=g2d;
+    this.g2d=g2d;    
   endfunction
   
-  task run;
-    forever begin
+  task run();
+    repeat (2) begin
       tr=new();
       assert(tr.randomize()) else $display("Nope");
       g2d.put(tr);
-      $display("values generated a%0d b%0d cin%0d",tr.a,tr.b,tr.cin);
+      $display("GEN:values generated a::%0d b::%0d cin::%0d",tr.a,tr.b,tr.cin);
     end
+
   endtask
 endclass
 
+//-----------------------------------------------------------------------------//
 class driver;
   transaction tr;
   generator gr;
   mailbox #(transaction) g2d;
-  virtual fsi fs; 
+  virtual fsi fi; 
   
-  function new(mailbox #(transaction) g2d);
-    //this.new=new();
+  function new(virtual fsi fi,mailbox #(transaction) g2d);
+    this.fi=fi;
     this.g2d=g2d;
   endfunction
   
-  task run;
-    //tr=new();
-    //gr=new();
-    forever begin
+  task run();
+    repeat (2) begin
+      tr=new();
       g2d.get(tr);
-      fs.a=tr.a;
-      fs.b=tr.b;
-      fs.cin=tr.cin;
-      $display("values generated a%0d b%0d cin%0d",fs.a,fs.b,fs.cin);
+      fi.a=tr.a;
+      fi.b=tr.b;
+      fi.cin=tr.cin;
+      $display("DRV:values Received a::%0d b::%0d cin::%0d",fi.a,fi.b,fi.cin);
     end
   endtask
 endclass
 
+//-----------------------------------------------------------------------------//
 class monitor;
-  driver dr;
-  virtual fsi fs;
-  transaction tr;
+
+  virtual fsi fi;
+  //transaction tr;
   mailbox #(transaction) m2s;
   
-  function new(mailbox #(transaction) m2s);
+  function new(virtual fsi fi,mailbox #(transaction) m2s);
+    this.fi=fi;
     this.m2s=m2s;
   endfunction
   
-  task run;
-    tr=new();
-    forever begin
-      tr.a <= fs.a;
-      tr.b <= fs.b;
-      tr.cin <= fs.cin;
+  task run();
+    transaction tr=new();
+    $display("MON:values generated a::%0d b::%0d cin::%0d",tr.a,tr.b,tr.cin);
+    repeat (2) begin
+      tr.a = fi.a;
+      tr.b = fi.b;
+      tr.cin = fi.cin;
       m2s.put(tr);
+      //$display("MON:values generated a::%0d b::%0d cin::%0d",tr.a,tr.b,tr.cin);
     end
   endtask
 endclass
 
+//-----------------------------------------------------------------------------//
 class scoreboard;
   monitor mon;
   transaction tr;
@@ -105,9 +120,11 @@ class scoreboard;
     this.m2s=m2s;
   endfunction
   
-  task run;
-    forever begin
+  task run();
+    repeat (2) begin
+    //forever begin
       m2s.get(tr);
+      
       //Reference model
       if ((tr.a - tr.b - tr.cin) == tr.cin)
         $display("Passs Bro");
@@ -123,28 +140,38 @@ class environment;
   monitor mon;
   scoreboard scr;
   
-  mailbox #(transaction)g2d= new();
-  mailbox #(transaction)m2s= new();
+  mailbox #(transaction)g2d;
+  mailbox #(transaction)m2s;
   virtual fsi fi;
   
   function new(virtual fsi fi);
-    this.fi=fi;
+    g2d=new();
+    m2s=new();
     gr=new(g2d);
-    dr=new(g2d);
-    mon=new(m2s);
+    dr=new(fi,g2d);
+    mon=new(fi,m2s);
     scr=new(m2s);
+    this.fi=fi;
+    dr.fi=this.fi;
+    mon.fi=this.fi;
   endfunction
   
-  task run();
+  task test();
     fork
       gr.run();
       dr.run();
       mon.run();
       scr.run();
-    join
+    join_any
   endtask
+  
+  task run();
+    test();
+  endtask
+  
 endclass
 
+/*
 class test;
   environment env;
   virtual fsi fi;
@@ -157,23 +184,23 @@ class test;
     env.run();
   endtask
 endclass
-  
+*/  
 
 module test_bench;
   fsi fi();
-  test t;
+  environment env;
   
   full_sub dut(.a(fi.a),.b(fi.b),.cin(fi.cin),.dif(fi.dif),.borrow(fi.borrow));
   
   initial begin
     //fi=new();
-    t=new(fi);
-    t.run();
+    env=new(fi);
+    env.run();
   end
   
   initial begin
-    #100;
-    $finish();
+    $dumpfile("dump.vcd");
+    $dumpvars;
   end
   
 endmodule  
